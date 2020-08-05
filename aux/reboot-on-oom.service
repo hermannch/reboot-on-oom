@@ -1,0 +1,10 @@
+[Unit]
+Description=Reboot if traces of OOM killer are found
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/reboot-on-oom
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

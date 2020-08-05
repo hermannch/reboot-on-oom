@@ -1,0 +1,120 @@
+#!/bin/sh
+#reboot if traces of OOM killer are found
+
+: "${RUNDIR:="/run"}"
+
+export PATH="/bin:/sbin/:/usr/bin:/usr/sbin"
+
+this="$(basename "$0")"
+reboot_marker_file="$RUNDIR/${this}.REBOOT-REQUESTED"
+
+msg() { printf '(%s): %s\n' "$this" "$@"; }
+
+# grep for traces of oom killer
+grep_for_oom_killer_traces() {
+	grep -q \
+		-e "oom_reaper:" \
+		-e "invoked oom-killer:" \
+		-e "oom-kill:" \
+		-e "Kill process" \
+		-e "Killed process" \
+		-e "Out of memory and no killable processes" \
+		"$@"
+}
+
+reboot_via_cmd() {
+	msg "Rebooting via command"
+
+	# determine how to reboot
+	reboot_cmd=
+	if command -v reboot >/dev/null; then
+		reboot_cmd="$(command -v reboot)"
+	elif command -v systemctl >/dev/null; then
+		reboot_cmd="$(command -v systemctl) reboot"
+	elif command -v halt >/dev/null; then
+		reboot_cmd="$(command -v halt) --reboot"
+	else
+		msg "ERROR: No command found suitable to reboot" >&2
+		return 1
+	fi
+	msg "Using command: '$reboot_cmd'"
+
+	# fork it to not wait forever on the blocking call
+	($reboot_cmd) &
+
+	sleep 10
+	msg "Reboot failed."
+}
+
+# ref: https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
+reboot_via_sysrq() {
+	msg "Rebooting via sysrq-trigger"
+
+	# availability of /proc/sysrq-trigger depends on CONFIG_MAGIC_SYSRQ
+	if [ ! -f /proc/sysrq-trigger ]; then
+		msg "ERROR: Cannot reboot via sysrq. /proc/sysrq is not available" >&2
+		return 1
+	fi
+
+	# make sure to have all functionality we need
+	echo 1 >/proc/sys/kernel/sysrq
+
+	# just in case, notify everyone
+	# e: Send a SIGTERM to all processes, except for init.
+	msg "  SIGTERM to all processes"
+	echo e >/proc/sysrq-trigger
+	sleep 1 #give everyone some time to exit
+
+	# i: Send a SIGKILL to all processes, except for init.
+	msg "  SIGKILL to all processes"
+	echo i >/proc/sysrq-trigger
+	sleep 1
+
+	# b: Will immediately reboot the system without syncing or unmounting your disks.
+	msg "  system reboot"
+	echo b >/proc/sysrq-trigger
+	sleep 1
+
+	# last resort: instant kernel panic
+	# c: perform a system crash by a NULL pointer dereference
+	msg "  kernel panic"
+	echo c >/proc/sysrq-trigger
+	sleep 1
+
+	msg "System reboot via sysrq-trigger failed"
+}
+
+msg "Starting up"
+while :; do
+
+	# did we ask for reboot already? (maybe got killed by OOM)
+	if [ -f "$reboot_marker_file" ]; then
+		msg "Reboot marker is present. It seems we were unable to reboot the last time?"
+		break
+	fi
+
+	# search for traces of OOM killer activity in the usual places.  Take
+	# /var/log into account as well, as dmesg ring buffer might be cleared.
+	if dmesg | grep_for_oom_killer_traces -; then
+		msg "Found traces of OOM killer activity in dmesg"
+		break
+	# NOTE: before enabling this branch, ensure no old traces in kernel.log lead
+	# to reboot loop
+	#elif grep_oom_killer_traces /var/log/kernel.log; then
+	#	msg "Found traces of OOM killer activity in /var/log/kernel.log
+	#	break
+	fi
+
+	sleep 15
+done
+
+echo 1 >"$reboot_marker_file"
+
+# nicely ask for reboot
+reboot_via_cmd
+
+# asking nicely failed, let's try the hard way
+reboot_via_sysrq
+
+msg "System is still alive and we're unable to reboot it."
+msg "Good luck :-/"
