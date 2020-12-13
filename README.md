@@ -1,6 +1,6 @@
 # Reboot on OOM
 
-Reboot the system when traces of OOM killer activity are found.
+Reboot the system when traces of kernel OOM killer activity are found in dmesg.
 
 ## Background
 
@@ -16,9 +16,9 @@ on OOM), you may want other processes to exit cleanly instead.
 This is what `reboot-on-oom` is about: it repeatedly greps on kernel's log
 (dmesg) to search for traces of OOM killer activity.
 If such traces are found, a clean reboot is performed.
-If that should fail (I've seen broken badly systems where OOM killer nuked
+If that should fail (I've seen badly broken systems where OOM killer nuked
 parts of systemd, making every call to `systemctl` fail), even harder measures
-are taken by using Linux' magig sysrq trigger `/proc/syseq-trigger`, escalating
+are taken by using Linux' magic sysrq trigger `/proc/syseq-trigger`, escalating
 one level at a time, ultimately crashing the kernel (you should make sure the
 machine reboots in this case).
 
