@@ -84,27 +84,29 @@ reboot_via_sysrq() {
 }
 
 msg "Starting up"
-while :; do
+found_oom=
 
-	# did we ask for reboot already? (maybe got killed by OOM)
-	if [ -f "$reboot_marker_file" ]; then
-		msg "Reboot marker is present. It seems we were unable to reboot the last time?"
-		break
-	fi
+# did we ask for reboot already? (maybe got killed by OOM)
+if [ -f "$reboot_marker_file" ]; then
+	msg "Reboot marker is present. It seems we were unable to reboot the last time?"
+	found_oom=y
+fi
+
+while [ -z "$found_oom" ]; do
 
 	# search for traces of OOM killer activity in the usual places.  Take
 	# /var/log into account as well, as dmesg ring buffer might be cleared.
 	if dmesg | grep_for_traces_of_oom_killer -; then
 		msg "Found traces of OOM killer activity in dmesg"
-		break
+		found_oom=y
 	# NOTE: before enabling this branch, ensure no old traces in kernel.log lead
 	# to reboot loop
 	#elif grep_oom_killer_traces /var/log/kernel.log; then
 	#	msg "Found traces of OOM killer activity in /var/log/kernel.log
 	#	break
+	else
+		sleep 15
 	fi
-
-	sleep 15
 done
 
 echo 1 >"$reboot_marker_file"
