@@ -10,8 +10,7 @@ reboot_marker_file="$RUNDIR/${this}.REBOOT-REQUESTED"
 
 msg() { printf '(%s): %s\n' "$this" "$@"; }
 
-# grep for traces of oom killer
-grep_for_oom_killer_traces() {
+grep_for_traces_of_oom_killer() {
 	grep -q \
 		-e "oom_reaper:" \
 		-e "invoked oom-killer:" \
@@ -95,7 +94,7 @@ while :; do
 
 	# search for traces of OOM killer activity in the usual places.  Take
 	# /var/log into account as well, as dmesg ring buffer might be cleared.
-	if dmesg | grep_for_oom_killer_traces -; then
+	if dmesg | grep_for_traces_of_oom_killer -; then
 		msg "Found traces of OOM killer activity in dmesg"
 		break
 	# NOTE: before enabling this branch, ensure no old traces in kernel.log lead
