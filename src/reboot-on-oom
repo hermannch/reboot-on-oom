@@ -2,6 +2,7 @@
 #reboot if traces of OOM killer are found
 
 : "${RUNDIR:="/run"}"
+: "${REBOOT_CMD:=""}"
 
 export PATH="/bin:/sbin/:/usr/bin:/usr/sbin"
 
@@ -21,39 +22,26 @@ grep_for_traces_of_oom_killer() {
 		"$@"
 }
 
+reboot_cmd=
 reboot_via_cmd() {
-	msg "Rebooting via command"
+	[ -z "$reboot_cmd" ] && return
 
-	# determine how to reboot
-	reboot_cmd=
-	if command -v reboot >/dev/null; then
-		reboot_cmd="$(command -v reboot)"
-	elif command -v systemctl >/dev/null; then
-		reboot_cmd="$(command -v systemctl) reboot"
-	elif command -v halt >/dev/null; then
-		reboot_cmd="$(command -v halt) --reboot"
-	else
-		msg "ERROR: No command found suitable to reboot" >&2
-		return 1
-	fi
-	msg "Using command: '$reboot_cmd'"
+	msg "Rebooting via command"
 
 	# fork it to not wait forever on the blocking call
 	($reboot_cmd) &
 
 	sleep 10
-	msg "Reboot failed."
+	msg "  WARNING: Reboot failed."
 }
 
+# availability of /proc/sysrq-trigger depends on CONFIG_MAGIC_SYSRQ
 # ref: https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html
+sysrq_available=
 reboot_via_sysrq() {
-	msg "Rebooting via sysrq-trigger"
+	[ -z "$sysrq_available" ] || return
 
-	# availability of /proc/sysrq-trigger depends on CONFIG_MAGIC_SYSRQ
-	if [ ! -f /proc/sysrq-trigger ]; then
-		msg "ERROR: Cannot reboot via sysrq. /proc/sysrq is not available" >&2
-		return 1
-	fi
+	msg "Rebooting via sysrq-trigger"
 
 	# make sure to have all functionality we need
 	echo 1 >/proc/sys/kernel/sysrq
@@ -80,20 +68,47 @@ reboot_via_sysrq() {
 	echo c >/proc/sysrq-trigger
 	sleep 1
 
-	msg "System reboot via sysrq-trigger failed"
+	msg "WARNING: System reboot via sysrq-trigger failed"
 }
 
 msg "Starting up"
-found_oom=
 
-# did we ask for reboot already? (maybe got killed by OOM)
+mkdir -p "$RUNDIR"
+
+# determine reboot command
+if [ -n "$REBOOT_CMD" ]; then
+	reboot_cmd="$REBOOT_CMD"
+elif command -v reboot >/dev/null; then
+	reboot_cmd="$(command -v reboot)"
+elif command -v halt >/dev/null; then
+	reboot_cmd="$(command -v halt) --reboot"
+elif command -v systemctl >/dev/null; then
+	reboot_cmd="$(command -v systemctl) reboot"
+else
+	msg "WARNING: No suitable reboot command" >&2
+fi
+[ -n "$reboot_cmd" ] && msg "Using command: '$reboot_cmd'"
+
+# determine sysrq availability
+if [ ! -f /proc/sysrq-trigger ]; then
+	msg "HINT: /proc/sysrq is not available" >&2
+else
+	sysrq_available=y
+fi
+
+if [ -z "$reboot_cmd" ] && [ -z "$sysrq_available" ]; then
+	msg "ERROR: don't know how to reboot" >&2
+	exit 1
+fi
+
+# did we try to reboot already? (maybe got killed by OOM)
+found_oom=
 if [ -f "$reboot_marker_file" ]; then
-	msg "Reboot marker is present. It seems we were unable to reboot the last time?"
+	msg "WARNING: Reboot marker is present. It seems we were unable to reboot the last time?"
 	found_oom=y
 fi
 
 while [ -z "$found_oom" ]; do
-
 	# search for traces of OOM killer activity in the usual places.  Take
 	# /var/log into account as well, as dmesg ring buffer might be cleared.
 	if dmesg | grep_for_traces_of_oom_killer -; then
